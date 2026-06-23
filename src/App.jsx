@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import HCaptcha from "@hcaptcha/react-hcaptcha";
 import "./App.css";
 
 const incidencias = [
@@ -32,12 +31,11 @@ const incidencias = [
 ];
 
 export default function App() {
-  const [captchaToken, setCaptchaToken] = useState("");
-  const captchaRef = useRef(null);
-
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState("");
+
   const toastTimeoutRef = useRef(null);
+  const formStartedAt = useRef(Date.now());
 
   const [form, setForm] = useState({
     nombre: "",
@@ -59,32 +57,24 @@ export default function App() {
     detalleRespuesta: "",
     autorizacion: "",
     observaciones: "",
+    website: "",
   });
 
   const [selected, setSelected] = useState([]);
 
-  // ================= TOAST =================
   const showToast = (msg) => {
     setToast(msg);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
 
-    if (toastTimeoutRef.current) {
-      clearTimeout(toastTimeoutRef.current);
-    }
-
-    toastTimeoutRef.current = setTimeout(() => {
-      setToast("");
-    }, 3000);
+    toastTimeoutRef.current = setTimeout(() => setToast(""), 3000);
   };
 
   useEffect(() => {
     return () => {
-      if (toastTimeoutRef.current) {
-        clearTimeout(toastTimeoutRef.current);
-      }
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     };
   }, []);
 
-  // ================= HANDLERS =================
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -119,11 +109,11 @@ export default function App() {
       detalleRespuesta: "",
       autorizacion: "",
       observaciones: "",
+      website: "",
     });
 
     setSelected([]);
-    setCaptchaToken("");
-    captchaRef.current?.resetCaptcha?.();
+    formStartedAt.current = Date.now();
   };
 
   const validate = () => {
@@ -134,11 +124,6 @@ export default function App() {
 
     if (form.telefono.length < 6) {
       showToast("Teléfono inválido");
-      return false;
-    }
-
-    if (!captchaToken) {
-      showToast("Completa el captcha");
       return false;
     }
 
@@ -156,13 +141,11 @@ export default function App() {
     try {
       const res = await fetch("/.netlify/functions/sendEmail", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
           tipos: selected,
-          token: captchaToken,
+          formStartedAt: formStartedAt.current,
         }),
       });
 
@@ -194,7 +177,18 @@ export default function App() {
 
         <form onSubmit={handleSubmit}>
 
-          {/* DATOS */}
+          {/* HONEYPOT */}
+          <input
+            type="text"
+            name="website"
+            value={form.website}
+            onChange={handleChange}
+            autoComplete="off"
+            tabIndex="-1"
+            className="honeypot"
+          />
+
+          {/* DATOS TRABAJADOR */}
           <section className="card">
             <h3>Datos del trabajador</h3>
             <div className="grid">
@@ -224,7 +218,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* CHECKBOX (FIX APLICADO AQUÍ) */}
+          {/* CHECKBOX */}
           <section className="card">
             <h3>Tipo de incidencia</h3>
 
@@ -234,7 +228,7 @@ export default function App() {
                   <input
                     type="checkbox"
                     value={item}
-                    checked={selected.includes(item)} 
+                    checked={selected.includes(item)}
                     onChange={handleCheckbox}
                   />
                   <span>{item}</span>
@@ -243,7 +237,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* DESCRIPCIÓN */}
+          {/* DESCRIPCIÓN + SELECTS RESTAURADOS */}
           <section className="card">
             <h3>Descripción</h3>
 
@@ -280,22 +274,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* CAPTCHA */}
-          <section className="card">
-            <h3>Verificación</h3>
-
-            <div style={{ transform: "scale(0.85)", transformOrigin: "0 0" }}>
-              <HCaptcha
-                sitekey={import.meta.env.VITE_HCAPTCHA_SITE_KEY}
-                theme="dark"
-                onVerify={setCaptchaToken}
-                onExpire={() => setCaptchaToken("")}
-                ref={captchaRef}
-              />
-            </div>
-          </section>
-
-          {/* BOTÓN */}
+          {/* BOTÓN (RESTAURADO) */}
           <button className="btn" type="submit" disabled={loading}>
             {loading ? "Enviando..." : "Enviar incidencia"}
           </button>

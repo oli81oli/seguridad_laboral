@@ -1,168 +1,237 @@
 import nodemailer from "nodemailer";
+import crypto from "crypto";
 
 // ===============================
-// MEMORY SIMPLE RATE LIMIT (per instance)
+// RATE LIMIT SIMPLE (in-memory)
 // ===============================
 const ipMemory = new Map();
+const RATE_LIMIT_MS = 30 * 1000; // 30 segundos
 
-const RATE_LIMIT_MS = 30 * 1000; // 30s entre envíos por IP
+// ===============================
+// CONFIG SEGURIDAD
+// ===============================
+const MIN_FORM_TIME = 5000; // 5s mínimo
+const MAX_DESC_LENGTH = 5000;
 
+const SECRET = process.env.HMAC_SECRET; // opcional si activas firma
+
+// ===============================
+// SANITIZADOR BÁSICO
+// ===============================
 const sanitize = (str = "") =>
-    str.toString().replace(/[<>]/g, ""); // básico anti HTML injection
+  String(str).replace(/[<>]/g, "").trim();
+
+// ===============================
+// HMAC VERIFY (opcional nivel pro)
+// ===============================
+const verifySignature = (payload, signature) => {
+  if (!SECRET || !signature) return true; // si no usas firma, no bloquea
+
+  const expected = crypto
+    .createHmac("sha256", SECRET)
+    .update(payload)
+    .digest("hex");
+
+  return expected === signature;
+};
 
 export const handler = async (event) => {
-    console.log("EMAIL_USER:", process.env.EMAIL_USER);
-console.log("EMAIL_TO:", process.env.EMAIL_TO);
-    if (event.httpMethod !== "POST") {
-        return {
-            statusCode: 405,
-            body: JSON.stringify({ ok: false, message: "Method not allowed" }),
-        };
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      body: JSON.stringify({
+        ok: false,
+        message: "Method not allowed",
+      }),
+    };
+  }
+
+  try {
+    // ===============================
+    // IP DETECTION
+    // ===============================
+    const ip =
+      event.headers["client-ip"] ||
+      event.headers["x-nf-client-connection-ip"] ||
+      event.headers["x-forwarded-for"] ||
+      "unknown";
+
+    // ===============================
+    // RATE LIMIT
+    // ===============================
+    const lastRequest = ipMemory.get(ip);
+
+    if (lastRequest && Date.now() - lastRequest < RATE_LIMIT_MS) {
+      return {
+        statusCode: 429,
+        body: JSON.stringify({
+          ok: false,
+          message: "Demasiadas solicitudes. Espera unos segundos.",
+        }),
+      };
     }
 
-    try {
-        const ip =
-            event.headers["client-ip"] ||
-            event.headers["x-nf-client-connection-ip"] ||
-            "unknown";
+    ipMemory.set(ip, Date.now());
 
-        // ===============================
-        // 1. RATE LIMIT
-        // ===============================
-        const lastRequest = ipMemory.get(ip);
+    // ===============================
+    // PARSE BODY
+    // ===============================
+    const data = JSON.parse(event.body);
 
-        if (lastRequest && Date.now() - lastRequest < RATE_LIMIT_MS) {
-            return {
-                statusCode: 429,
-                body: JSON.stringify({
-                    ok: false,
-                    message: "Demasiadas solicitudes. Espera un momento.",
-                }),
-            };
-        }
+    const {
+      nombre,
+      empleado,
+      telefono,
+      email,
+      fecha,
+      hora,
+      base,
+      vehiculo,
+      matricula,
+      descripcion,
+      tipos,
+      website, // honeypot
+      formStartedAt,
 
-        ipMemory.set(ip, Date.now());
+      // 👇 opcionales si luego activas firma HMAC
+      timestamp,
+      nonce,
+      signature,
+    } = data;
 
-        const data = JSON.parse(event.body);
+    // ===============================
+    // HONEYPOT
+    // ===============================
+    if (website && website.trim() !== "") {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          ok: false,
+          message: "Spam detectado",
+        }),
+      };
+    }
 
-        const {
-            nombre,
-            empleado,
-            telefono,
-            email,
-            fecha,
-            hora,
-            base,
-            vehiculo,
-            matricula,
-            descripcion,
-            tipos,
-            token,
-            website, // honeypot
-        } = data;
+    // ===============================
+    // TIEMPO DE FORMULARIO
+    // ===============================
+    if (formStartedAt) {
+      const elapsed = Date.now() - Number(formStartedAt);
 
-        // ===============================
-        // 2. HONEYPOT (spam bots)
-        // ===============================
-        if (website) {
-            return {
-                statusCode: 400,
-                body: JSON.stringify({ ok: false, message: "Spam detectado" }),
-            };
-        }
-
-        // ===============================
-        // 3. CAPTCHA
-        // ===============================
-        if (!token) {
-            return {
-                statusCode: 400,
-                body: JSON.stringify({ ok: false, message: "Captcha requerido" }),
-            };
-        }
-
-        const captchaRes = await fetch(
-            "https://hcaptcha.com/siteverify",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: new URLSearchParams({
-                    secret: process.env.HCAPTCHA_SECRET,
-                    response: token,
-                }),
-            }
-        );
-
-        const captchaData = await captchaRes.json();
-
-        if (!captchaData.success) {
-            return {
-                statusCode: 400,
-                body: JSON.stringify({
-                    ok: false,
-                    message: "Captcha inválido",
-                }),
-            };
-        }
-
-        // ===============================
-        // 4. VALIDACIÓN BÁSICA
-        // ===============================
-        if (!nombre || !telefono || !descripcion) {
-            return {
-                statusCode: 400,
-                body: JSON.stringify({
-                    ok: false,
-                    message: "Faltan campos obligatorios",
-                }),
-            };
-        }
-
-        // ===============================
-        // 5. SANITIZACIÓN
-        // ===============================
-        const safeData = {
-            nombre: sanitize(nombre),
-            empleado: sanitize(empleado),
-            telefono: sanitize(telefono),
-            email: sanitize(email),
-            fecha: sanitize(fecha),
-            hora: sanitize(hora),
-            base: sanitize(base),
-            vehiculo: sanitize(vehiculo),
-            matricula: sanitize(matricula),
-            descripcion: sanitize(descripcion),
-            tipos: (tipos || []).map(sanitize),
+      if (elapsed < MIN_FORM_TIME) {
+        return {
+          statusCode: 400,
+          body: JSON.stringify({
+            ok: false,
+            message: "Envío demasiado rápido",
+          }),
         };
+      }
+    }
 
-        // ===============================
-        // 6. EMAIL TRANSPORT
-        // ===============================
-        const transporter = nodemailer.createTransport({
-            service: "gmail",
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS,
-            },
-        });
+    // ===============================
+    // VALIDACIONES BÁSICAS
+    // ===============================
+    if (!nombre || !telefono || !descripcion) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          ok: false,
+          message: "Faltan campos obligatorios",
+        }),
+      };
+    }
 
-        const html = `
+    if (telefono.length < 6) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          ok: false,
+          message: "Teléfono inválido",
+        }),
+      };
+    }
+
+    if (descripcion.length > MAX_DESC_LENGTH) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          ok: false,
+          message: "Descripción demasiado larga",
+        }),
+      };
+    }
+
+    // ===============================
+    // HMAC CHECK (solo si lo activas)
+    // ===============================
+    if (SECRET && signature) {
+      const payload = JSON.stringify({
+        nombre,
+        telefono,
+        descripcion,
+        timestamp,
+        nonce,
+      });
+
+      const valid = verifySignature(payload, signature);
+
+      if (!valid) {
+        return {
+          statusCode: 403,
+          body: JSON.stringify({
+            ok: false,
+            message: "Firma inválida",
+          }),
+        };
+      }
+    }
+
+    // ===============================
+    // SANITIZACIÓN
+    // ===============================
+    const safeData = {
+      nombre: sanitize(nombre),
+      empleado: sanitize(empleado),
+      telefono: sanitize(telefono),
+      email: sanitize(email),
+      fecha: sanitize(fecha),
+      hora: sanitize(hora),
+      base: sanitize(base),
+      vehiculo: sanitize(vehiculo),
+      matricula: sanitize(matricula),
+      descripcion: sanitize(descripcion),
+      tipos: Array.isArray(tipos)
+        ? tipos.map((t) => sanitize(t))
+        : [],
+    };
+
+    // ===============================
+    // TRANSPORTER EMAIL
+    // ===============================
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const html = `
       <h2>Nueva incidencia UGT Madrid Río</h2>
 
       <h3>Trabajador</h3>
-      <p><b>Nombre:</b> ${safeData.nombre}</p>
-      <p><b>Empleado:</b> ${safeData.empleado}</p>
-      <p><b>Teléfono:</b> ${safeData.telefono}</p>
-      <p><b>Email:</b> ${safeData.email}</p>
+      <p><strong>Nombre:</strong> ${safeData.nombre}</p>
+      <p><strong>Empleado:</strong> ${safeData.empleado}</p>
+      <p><strong>Teléfono:</strong> ${safeData.telefono}</p>
+      <p><strong>Email:</strong> ${safeData.email}</p>
 
       <h3>Incidencia</h3>
-      <p><b>Fecha:</b> ${safeData.fecha}</p>
-      <p><b>Hora:</b> ${safeData.hora}</p>
-      <p><b>Base:</b> ${safeData.base}</p>
-      <p><b>Vehículo:</b> ${safeData.vehiculo}</p>
-      <p><b>Matrícula:</b> ${safeData.matricula}</p>
+      <p><strong>Fecha:</strong> ${safeData.fecha}</p>
+      <p><strong>Hora:</strong> ${safeData.hora}</p>
+      <p><strong>Base:</strong> ${safeData.base}</p>
+      <p><strong>Vehículo:</strong> ${safeData.vehiculo}</p>
+      <p><strong>Matrícula:</strong> ${safeData.matricula}</p>
 
       <h3>Tipos</h3>
       <p>${safeData.tipos.join(", ")}</p>
@@ -174,27 +243,31 @@ console.log("EMAIL_TO:", process.env.EMAIL_TO);
       <small>IP: ${ip}</small>
     `;
 
-      const info = await transporter.sendMail({
-            from: `"Incidencias UGT" <${process.env.EMAIL_USER}>`,
-            to: process.env.EMAIL_TO,
-            subject: "Nueva incidencia recibida",
-            html,
-        });
-        console.log("EMAIL ENVIADO:", info.messageId);
+    // ===============================
+    // ENVÍO EMAIL
+    // ===============================
+    await transporter.sendMail({
+      from: `"Incidencias UGT" <${process.env.EMAIL_USER}>`,
+      to: process.env.EMAIL_TO,
+      subject: "Nueva incidencia recibida",
+      html,
+    });
 
-        return {
-            statusCode: 200,
-            body: JSON.stringify({ ok: true }),
-        };
-    } catch (err) {
-        console.error("ERROR:", err);
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        ok: true,
+      }),
+    };
+  } catch (err) {
+    console.error("ERROR:", err);
 
-        return {
-            statusCode: 500,
-            body: JSON.stringify({
-                ok: false,
-                message: "Error interno del servidor",
-            }),
-        };
-    }
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        ok: false,
+        message: "Error interno del servidor",
+      }),
+    };
+  }
 };
