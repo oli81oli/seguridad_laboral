@@ -48,15 +48,20 @@ export default function App() {
     vehiculo: "",
     matricula: "",
     descripcion: "",
+
     riesgo: "",
     gravedad: "",
     continua: "",
+
     comunicada: "",
     comunicadoA: "",
     respuesta: "",
     detalleRespuesta: "",
+
     autorizacion: "",
+
     observaciones: "",
+
     website: "",
   });
 
@@ -100,15 +105,20 @@ export default function App() {
       vehiculo: "",
       matricula: "",
       descripcion: "",
+
       riesgo: "",
       gravedad: "",
       continua: "",
+
       comunicada: "",
       comunicadoA: "",
       respuesta: "",
       detalleRespuesta: "",
+
       autorizacion: "",
+
       observaciones: "",
+
       website: "",
     });
 
@@ -117,6 +127,11 @@ export default function App() {
   };
 
   const validate = () => {
+    if (!form.autorizacion) {
+      showToast("Debes indicar si autorizas el uso de la información");
+      return false;
+    }
+
     if (!form.nombre || !form.telefono || !form.descripcion) {
       showToast("Rellena los campos obligatorios");
       return false;
@@ -188,6 +203,15 @@ export default function App() {
             className="honeypot"
           />
 
+          {/* TEXTO LEGAL */}
+          <section className="card">
+            <p>
+              Este formulario tiene como finalidad comunicar incidencias relacionadas con la seguridad, salud,
+              condiciones de trabajo, vehículos e instalaciones. La información será tratada con confidencialidad
+              por los Delegados de Prevención de UGT.
+            </p>
+          </section>
+
           {/* DATOS TRABAJADOR */}
           <section className="card">
             <h3>Datos del trabajador</h3>
@@ -203,8 +227,8 @@ export default function App() {
           <section className="card">
             <h3>Datos de la incidencia</h3>
             <div className="grid">
-              <input type="date" name="fecha" onChange={handleChange} value={form.fecha} />
-              <input type="time" name="hora" onChange={handleChange} value={form.hora} />
+              <input type="date" name="fecha" onChange={handleChange} value={form.fecha} placeholder="Fecha" />
+              <input type="time" name="hora" onChange={handleChange} value={form.hora} placeholder="Hora" />
 
               <select name="base" onChange={handleChange} value={form.base}>
                 <option value="">Base</option>
@@ -218,10 +242,9 @@ export default function App() {
             </div>
           </section>
 
-          {/* CHECKBOX */}
+          {/* TIPOS */}
           <section className="card">
             <h3>Tipo de incidencia</h3>
-
             <div className="checkbox-list">
               {incidencias.map((item) => (
                 <label key={item} className="checkbox-item">
@@ -237,7 +260,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* DESCRIPCIÓN + SELECTS RESTAURADOS */}
+          {/* DESCRIPCIÓN */}
           <section className="card">
             <h3>Descripción</h3>
 
@@ -251,7 +274,7 @@ export default function App() {
 
             <div className="grid">
               <select name="riesgo" onChange={handleChange} value={form.riesgo}>
-                <option value="">Riesgo</option>
+                <option value="">¿Existe riesgo?</option>
                 <option>Sí</option>
                 <option>No</option>
                 <option>No estoy seguro</option>
@@ -266,7 +289,7 @@ export default function App() {
               </select>
 
               <select name="continua" onChange={handleChange} value={form.continua}>
-                <option value="">Continúa</option>
+                <option value="">¿Continúa?</option>
                 <option>Sí</option>
                 <option>No</option>
                 <option>Desconocido</option>
@@ -274,7 +297,81 @@ export default function App() {
             </div>
           </section>
 
-          {/* BOTÓN (RESTAURADO) */}
+          {/* COMUNICACIÓN PREVIA */}
+          <section className="card">
+            <h3>Comunicación previa</h3>
+
+            <select name="comunicada" onChange={handleChange} value={form.comunicada}>
+              <option value="">¿Ha sido comunicada?</option>
+              <option>Sí</option>
+              <option>No</option>
+            </select>
+
+            {form.comunicada === "Sí" && (
+              <div className="grid">
+                <input
+                  name="comunicadoA"
+                  placeholder="¿A quién se comunicó?"
+                  value={form.comunicadoA}
+                  onChange={handleChange}
+                />
+
+                <select
+                  name="respuesta"
+                  value={form.respuesta}
+                  onChange={handleChange}
+                >
+                  <option value="">¿Recibió respuesta?</option>
+                  <option>Sí</option>
+                  <option>No</option>
+                </select>
+              </div>
+            )}
+
+            {form.respuesta === "Sí" && form.comunicada === "Sí" && (
+              <textarea
+                name="detalleRespuesta"
+                rows="3"
+                placeholder="Explica la respuesta recibida"
+                value={form.detalleRespuesta}
+                onChange={handleChange}
+              />
+            )}
+          </section>
+
+          {/* OBSERVACIONES */}
+          <section className="card">
+            <h3>Observaciones adicionales</h3>
+            <textarea
+              name="observaciones"
+              rows="4"
+              placeholder="Observaciones"
+              value={form.observaciones}
+              onChange={handleChange}
+            />
+          </section>
+
+          {/* AUTORIZACIÓN */}
+          <section className="card">
+            <h3>Autorización</h3>
+
+            <select
+              name="autorizacion"
+              value={form.autorizacion}
+              onChange={handleChange}
+            >
+              <option value="">¿Autoriza el uso de la información?</option>
+              <option>Sí</option>
+              <option>No</option>
+            </select>
+
+            <p style={{ marginTop: "10px", fontSize: "13px", color: "#555" }}>
+              Los Delegados de Prevención de UGT podrán utilizar esta información para su traslado
+              a la empresa o a los organismos competentes cuando sea necesario.
+            </p>
+          </section>
+
+          {/* BOTÓN */}
           <button className="btn" type="submit" disabled={loading}>
             {loading ? "Enviando..." : "Enviar incidencia"}
           </button>

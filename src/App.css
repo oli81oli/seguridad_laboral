@@ -64,14 +64,21 @@ textarea {
   padding: 10px;
   border: 1px solid #ccc;
   border-radius: 8px;
+  font-size: 14px;
 }
 
-/* CHECKBOX LIST (ESTABLE REAL) */
+/* TEXTAREA MEJORADO */
+textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+
+/* CHECKBOX LIST */
 .checkbox-list {
   display: block;
 }
 
-/* 🔥 ESTO ES EXACTAMENTE LO QUE QUERÍAS */
+/* CHECKBOX ITEM */
 .checkbox-item {
   display: flex;
   align-items: flex-start;
@@ -104,6 +111,8 @@ textarea {
 .btn:hover {
   opacity: 0.9;
 }
+
+/* TOAST */
 .toast {
   position: fixed;
   top: 20px;
@@ -119,7 +128,7 @@ textarea {
   animation: fadeInOut 3s ease forwards;
 }
 
-/* animación toast */
+/* ANIMACIÓN TOAST */
 @keyframes fadeInOut {
   0% {
     opacity: 0;
@@ -138,7 +147,7 @@ textarea {
   }
 }
 
-/* SPINNER OVERLAY */
+/* SPINNER */
 .spinner {
   position: fixed;
   inset: 0;
@@ -149,7 +158,6 @@ textarea {
   z-index: 9998;
 }
 
-/* spinner círculo */
 .spinner::after {
   content: "";
   width: 45px;
@@ -166,9 +174,36 @@ textarea {
   }
 }
 
+/* HONEYPOT */
 .honeypot {
   position: absolute;
   left: -9999px;
   opacity: 0;
   pointer-events: none;
-} 
+}
+
+/* =========================
+   NUEVO: BLOQUE LEGAL
+   ========================= */
+.card p {
+  line-height: 1.5;
+  font-size: 14px;
+  color: #444;
+}
+
+/* =========================
+   NUEVO: SECCIÓN CONDICIONAL
+   (Comunicación previa)
+   ========================= */
+.card .grid + .grid {
+  margin-top: 10px;
+}
+
+/* Mejora visual selects condicionales */
+select:disabled,
+input:disabled,
+textarea:disabled {
+  background: #f2f2f2;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
