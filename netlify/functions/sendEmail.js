@@ -10,13 +10,13 @@ const RATE_LIMIT_MS = 30 * 1000; // 30 segundos
 // ===============================
 // CONFIG SEGURIDAD
 // ===============================
-const MIN_FORM_TIME = 5000; // 5s mínimo
+const MIN_FORM_TIME = 5000;
 const MAX_DESC_LENGTH = 5000;
 
 const SECRET = process.env.HMAC_SECRET;
 
 // ===============================
-// SANITIZADOR BÁSICO
+// SANITIZADOR
 // ===============================
 const sanitize = (str = "") =>
   String(str).replace(/[<>]/g, "").trim();
@@ -48,7 +48,7 @@ export const handler = async (event) => {
 
   try {
     // ===============================
-    // IP DETECTION
+    // IP
     // ===============================
     const ip =
       event.headers["client-ip"] ||
@@ -74,7 +74,7 @@ export const handler = async (event) => {
     ipMemory.set(ip, Date.now());
 
     // ===============================
-    // PARSE BODY
+    // BODY
     // ===============================
     const data = JSON.parse(event.body);
 
@@ -126,7 +126,7 @@ export const handler = async (event) => {
     }
 
     // ===============================
-    // TIEMPO FORMULARIO
+    // TIME CHECK
     // ===============================
     if (formStartedAt) {
       const elapsed = Date.now() - Number(formStartedAt);
@@ -143,7 +143,7 @@ export const handler = async (event) => {
     }
 
     // ===============================
-    // VALIDACIONES BÁSICAS
+    // VALIDACIONES
     // ===============================
     if (!nombre || !telefono || !descripcion) {
       return {
@@ -186,7 +186,7 @@ export const handler = async (event) => {
     }
 
     // ===============================
-    // HMAC CHECK (opcional)
+    // HMAC
     // ===============================
     if (SECRET && signature) {
       const payload = JSON.stringify({
@@ -234,9 +234,8 @@ export const handler = async (event) => {
       respuesta: sanitize(respuesta),
       detalleRespuesta: sanitize(detalleRespuesta),
 
-      autorizacion: sanitize(autorizacion),
-
       observaciones: sanitize(observaciones),
+      autorizacion: sanitize(autorizacion),
 
       tipos: Array.isArray(tipos)
         ? tipos.map((t) => sanitize(t))
@@ -244,10 +243,12 @@ export const handler = async (event) => {
     };
 
     // ===============================
-    // EMAIL TRANSPORTER
+    // TRANSPORTER (SMTP PRO)
     // ===============================
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -255,137 +256,99 @@ export const handler = async (event) => {
     });
 
     // ===============================
-    // HTML EMAIL
+    // HTML PRO
     // ===============================
     const html = `
 <div style="font-family: Arial, Helvetica, sans-serif; background:#f4f6f8; padding:20px;">
+  <div style="max-width:800px; margin:0 auto; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
 
-  <div style="max-width:800px; margin:0 auto; background:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
-
-    <!-- HEADER -->
-    <div style="background:#e4002b; color:white; padding:18px 20px;">
+    <div style="background:#e4002b; color:#fff; padding:18px 20px;">
       <h2 style="margin:0; font-size:18px;">Nueva incidencia registrada</h2>
-      <p style="margin:5px 0 0; font-size:13px; opacity:0.9;">
-        UGT Madrid Río · Sistema de incidencias
-      </p>
+      <p style="margin:5px 0 0; font-size:13px;">UGT Madrid Río</p>
     </div>
 
-    <!-- BODY -->
     <div style="padding:20px;">
 
-      <!-- RESUMEN -->
-      <div style="background:#f9f9f9; padding:12px 15px; border-radius:8px; margin-bottom:20px;">
-        <h3 style="margin:0 0 10px; font-size:14px; color:#333;">Resumen rápido</h3>
-        <p style="margin:0; font-size:13px;">
-          <strong>Nombre:</strong> ${safe.nombre || "-"}<br/>
-          <strong>Teléfono:</strong> ${safe.telefono || "-"}<br/>
-          <strong>Base:</strong> ${safe.base || "-"}<br/>
-          <strong>Fecha:</strong> ${safe.fecha || "-"} ${safe.hora || ""}
-        </p>
-      </div>
-
-      <!-- TRABAJADOR -->
-      <h3 style="font-size:14px; color:#e4002b; border-bottom:1px solid #eee; padding-bottom:5px;">
-        Datos del trabajador
-      </h3>
-
-      <p style="font-size:13px; line-height:1.6;">
-        <strong>Nombre:</strong> ${safe.nombre || "-"}<br/>
-        <strong>Empleado:</strong> ${safe.empleado || "-"}<br/>
-        <strong>Teléfono:</strong> ${safe.telefono || "-"}<br/>
-        <strong>Email:</strong> ${safe.email || "-"}
-      </p>
-
-      <!-- INCIDENCIA -->
-      <h3 style="font-size:14px; color:#e4002b; border-bottom:1px solid #eee; padding-bottom:5px;">
-        Incidencia
-      </h3>
-
-      <p style="font-size:13px; line-height:1.6;">
-        <strong>Fecha:</strong> ${safe.fecha || "-"}<br/>
-        <strong>Hora:</strong> ${safe.hora || "-"}<br/>
-        <strong>Base:</strong> ${safe.base || "-"}<br/>
-        <strong>Vehículo:</strong> ${safe.vehiculo || "-"}<br/>
-        <strong>Matrícula:</strong> ${safe.matricula || "-"}
-      </p>
-
-      <!-- TIPOS -->
-      <h3 style="font-size:14px; color:#e4002b; border-bottom:1px solid #eee; padding-bottom:5px;">
-        Tipo de incidencia
-      </h3>
-
-      <p style="font-size:13px; line-height:1.6;">
-        ${safe.tipos.length ? safe.tipos.join(", ") : "-"}
-      </p>
-
-      <!-- CONDICIONES -->
-      <h3 style="font-size:14px; color:#e4002b; border-bottom:1px solid #eee; padding-bottom:5px;">
-        Evaluación del riesgo
-      </h3>
-
-      <p style="font-size:13px; line-height:1.6;">
-        <strong>Riesgo:</strong> ${safe.riesgo || "-"}<br/>
-        <strong>Gravedad:</strong> ${safe.gravedad || "-"}<br/>
-        <strong>Continúa:</strong> ${safe.continua || "-"}
-      </p>
-
-      <!-- COMUNICACIÓN -->
-      <h3 style="font-size:14px; color:#e4002b; border-bottom:1px solid #eee; padding-bottom:5px;">
-        Comunicación previa
-      </h3>
-
-      <p style="font-size:13px; line-height:1.6;">
-        <strong>Comunicada:</strong> ${safe.comunicada || "-"}<br/>
-        <strong>Comunicado a:</strong> ${safe.comunicadoA || "-"}<br/>
-        <strong>Respuesta:</strong> ${safe.respuesta || "-"}<br/>
-        <strong>Detalle:</strong> ${safe.detalleRespuesta || "-"}
-      </p>
-
-      <!-- DESCRIPCIÓN -->
-      <h3 style="font-size:14px; color:#e4002b; border-bottom:1px solid #eee; padding-bottom:5px;">
-        Descripción
-      </h3>
-
-      <p style="font-size:13px; line-height:1.6; white-space:pre-wrap;">
-        ${safe.descripcion || "-"}
-      </p>
-
-      <!-- OBSERVACIONES -->
-      <h3 style="font-size:14px; color:#e4002b; border-bottom:1px solid #eee; padding-bottom:5px;">
-        Observaciones
-      </h3>
-
-      <p style="font-size:13px; line-height:1.6; white-space:pre-wrap;">
-        ${safe.observaciones || "-"}
-      </p>
-
-      <!-- AUTORIZACIÓN -->
-      <h3 style="font-size:14px; color:#e4002b; border-bottom:1px solid #eee; padding-bottom:5px;">
-        Autorización
-      </h3>
-
+      <h3 style="color:#e4002b;">Resumen</h3>
       <p style="font-size:13px;">
-        <strong>Uso de información:</strong> ${safe.autorizacion || "-"}
+        <b>Nombre:</b> ${safe.nombre}<br/>
+        <b>Teléfono:</b> ${safe.telefono}<br/>
+        <b>Base:</b> ${safe.base}<br/>
+        <b>Fecha:</b> ${safe.fecha} ${safe.hora}
       </p>
 
-      <!-- FOOTER -->
-      <div style="margin-top:25px; font-size:11px; color:#777; border-top:1px solid #eee; padding-top:10px;">
-        IP registrada: ${ip}
-      </div>
+      <h3 style="color:#e4002b;">Incidencia</h3>
+      <p style="font-size:13px;">
+        <b>Vehículo:</b> ${safe.vehiculo}<br/>
+        <b>Matrícula:</b> ${safe.matricula}
+      </p>
+
+      <h3 style="color:#e4002b;">Tipos</h3>
+      <p style="font-size:13px;">${safe.tipos.join(", ")}</p>
+
+      <h3 style="color:#e4002b;">Riesgo</h3>
+      <p style="font-size:13px;">
+        <b>Riesgo:</b> ${safe.riesgo}<br/>
+        <b>Gravedad:</b> ${safe.gravedad}<br/>
+        <b>Continúa:</b> ${safe.continua}
+      </p>
+
+      <h3 style="color:#e4002b;">Descripción</h3>
+      <p style="font-size:13px; white-space:pre-wrap;">${safe.descripcion}</p>
+
+      <h3 style="color:#e4002b;">Autorización</h3>
+      <p style="font-size:13px;">${safe.autorizacion}</p>
+
+      <h3 style="color:#e4002b;">Observaciones</h3>
+      <p style="font-size:13px; white-space:pre-wrap;">${safe.observaciones}</p>
 
     </div>
   </div>
 </div>
-`;;
+`;
+
+    // ===============================
+    // TEXT (ANTI-SPAM)
+    // ===============================
+    const text = `
+NUEVA INCIDENCIA UGT MADRID RÍO
+
+Nombre: ${safe.nombre}
+Teléfono: ${safe.telefono}
+Base: ${safe.base}
+Fecha: ${safe.fecha} ${safe.hora}
+
+Vehículo: ${safe.vehiculo}
+Matrícula: ${safe.matricula}
+
+Tipos: ${safe.tipos.join(", ")}
+
+Riesgo: ${safe.riesgo}
+Gravedad: ${safe.gravedad}
+Continúa: ${safe.continua}
+
+Descripción:
+${safe.descripcion}
+
+Autorización: ${safe.autorizacion}
+
+Observaciones:
+${safe.observaciones}
+`;
 
     // ===============================
     // SEND EMAIL
     // ===============================
     await transporter.sendMail({
-      from: `"Incidencias UGT" <${process.env.EMAIL_USER}>`,
+      from: `"UGT Incidencias" <${process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_TO,
+      replyTo: email || process.env.EMAIL_USER,
       subject: "Nueva incidencia recibida",
       html,
+      text,
+      headers: {
+        "X-Entity-Ref-ID": "ugt-incidencias",
+      },
     });
 
     return {
