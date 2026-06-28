@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import "./App.css";
+import { uploadToCloudinary } from "./cloudinary";
 
 const incidencias = [
   "Neumáticos desgastados o en mal estado",
@@ -31,7 +32,9 @@ const incidencias = [
 ];
 
 export default function App() {
-  const [loading, setLoading] = useState(false);
+  const [files, setFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState("");
 
   const toastTimeoutRef = useRef(null);
@@ -48,20 +51,15 @@ export default function App() {
     vehiculo: "",
     matricula: "",
     descripcion: "",
-
     riesgo: "",
     gravedad: "",
     continua: "",
-
     comunicada: "",
     comunicadoA: "",
     respuesta: "",
     detalleRespuesta: "",
-
     autorizacion: "",
-
     observaciones: "",
-
     website: "",
   });
 
@@ -77,6 +75,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      previews.forEach(URL.revokeObjectURL);
     };
   }, []);
 
@@ -93,6 +92,39 @@ export default function App() {
     );
   };
 
+  const MAX_FILES = 5;
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+
+  const validateFiles = (filesList) => {
+    if (filesList.length > MAX_FILES) {
+      showToast("Máximo 5 imágenes permitidas");
+      return false;
+    }
+
+    for (const file of filesList) {
+      if (!allowedTypes.includes(file.type)) {
+        showToast("Solo JPG, PNG o WEBP");
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const handleFileChange = (e) => {
+    const selectedFiles = Array.from(e.target.files || []);
+
+    if (!validateFiles(selectedFiles)) {
+      e.target.value = "";
+      setFiles([]);
+      setPreviews([]);
+      return;
+    }
+
+    setFiles(selectedFiles);
+    setPreviews(selectedFiles.map((f) => URL.createObjectURL(f)));
+  };
+
   const resetForm = () => {
     setForm({
       nombre: "",
@@ -105,24 +137,21 @@ export default function App() {
       vehiculo: "",
       matricula: "",
       descripcion: "",
-
       riesgo: "",
       gravedad: "",
       continua: "",
-
       comunicada: "",
       comunicadoA: "",
       respuesta: "",
       detalleRespuesta: "",
-
       autorizacion: "",
-
       observaciones: "",
-
       website: "",
     });
 
     setSelected([]);
+    setFiles([]);
+    setPreviews([]);
     formStartedAt.current = Date.now();
   };
 
@@ -132,7 +161,7 @@ export default function App() {
       return false;
     }
 
-    if (!form.nombre || !form.telefono || !form.descripcion) {
+    if (!form.nombre || !form.telefono || !form.descripcion || !form.base) {
       showToast("Rellena los campos obligatorios");
       return false;
     }
@@ -145,24 +174,49 @@ export default function App() {
     return true;
   };
 
+  const uploadFiles = async () => {
+    if (files.length === 0) return [];
+
+    const uploadedUrls = [];
+
+    for (const file of files) {
+      const res = await uploadToCloudinary(file);
+      if (!res?.secure_url) {
+        throw new Error("Cloudinary no devolvió una URL segura");
+      }
+
+      uploadedUrls.push(res.secure_url);
+    }
+
+    return uploadedUrls;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (loading) return;
+    if (submitting) return;
     if (!validate()) return;
 
-    setLoading(true);
+    if (files.length > 0 && !validateFiles(files)) return;
+
+    setSubmitting(true);
 
     try {
-      const res = await fetch("/.netlify/functions/sendEmail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          tipos: selected,
-          formStartedAt: formStartedAt.current,
-        }),
-      });
+      const fotos = await uploadFiles();
+
+      const res = await fetch(
+        "/.netlify/functions/sendEmail",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...form,
+            tipos: selected,
+            fotos,
+            formStartedAt: formStartedAt.current,
+          }),
+        }
+      );
 
       const data = await res.json();
 
@@ -173,9 +227,10 @@ export default function App() {
         showToast(data?.message || "Error al enviar");
       }
     } catch (err) {
+      console.error(err);
       showToast("Error de conexión");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -187,7 +242,7 @@ export default function App() {
 
         <header className="hero">
           <h1>FORMULARIO DE INCIDENCIAS</h1>
-          <h2>UGT MADRID RÍO</h2>
+          <h2>UGT</h2>
         </header>
 
         <form onSubmit={handleSubmit}>
@@ -210,6 +265,7 @@ export default function App() {
               condiciones de trabajo, vehículos e instalaciones. La información será tratada con confidencialidad
               por los Delegados de Prevención de UGT.
             </p>
+            <p className="required-note">Los campos marcados con <span className="asterisk">*</span> son obligatorios</p>
           </section>
 
           {/* DATOS TRABAJADOR */}
@@ -227,14 +283,17 @@ export default function App() {
           <section className="card">
             <h3>Datos de la incidencia</h3>
             <div className="grid">
-              <input type="date" name="fecha" onChange={handleChange} value={form.fecha} placeholder="Fecha" />
-              <input type="time" name="hora" onChange={handleChange} value={form.hora} placeholder="Hora" />
+              <input type="date" name="fecha" onChange={handleChange} value={form.fecha} />
+              <input type="time" name="hora" onChange={handleChange} value={form.hora} />
 
               <select name="base" onChange={handleChange} value={form.base}>
-                <option value="">Base</option>
-                <option>Madrid Río</option>
-                <option>La Vaguada</option>
-                <option>Otra</option>
+                <option value="">Base *</option>
+                <option>Miravete</option>
+                <option>San Epi</option>
+                <option>Ventas</option>
+                <option>Madrid Rio</option>
+                <option>Vistalegre</option>
+                <option>Vaguada</option>
               </select>
 
               <input name="vehiculo" placeholder="Vehículo" onChange={handleChange} value={form.vehiculo} />
@@ -316,11 +375,7 @@ export default function App() {
                   onChange={handleChange}
                 />
 
-                <select
-                  name="respuesta"
-                  value={form.respuesta}
-                  onChange={handleChange}
-                >
+                <select name="respuesta" value={form.respuesta} onChange={handleChange}>
                   <option value="">¿Recibió respuesta?</option>
                   <option>Sí</option>
                   <option>No</option>
@@ -351,6 +406,26 @@ export default function App() {
             />
           </section>
 
+          {/* DOCUMENTACIÓN */}
+          <section className="card">
+            <h3>Documentación</h3>
+
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              onChange={handleFileChange}
+            />
+
+            {previews.length > 0 && (
+              <div className="preview-grid">
+                {previews.map((url, i) => (
+                  <img key={i} src={url} className="preview-thumb" alt={`Vista previa ${i + 1}`} />
+                ))}
+              </div>
+            )}
+          </section>
+
           {/* AUTORIZACIÓN */}
           <section className="card">
             <h3>Autorización</h3>
@@ -360,7 +435,7 @@ export default function App() {
               value={form.autorizacion}
               onChange={handleChange}
             >
-              <option value="">¿Autoriza el uso de la información?</option>
+              <option value="">¿Autoriza el uso de la información? *</option>
               <option>Sí</option>
               <option>No</option>
             </select>
@@ -372,8 +447,8 @@ export default function App() {
           </section>
 
           {/* BOTÓN */}
-          <button className="btn" type="submit" disabled={loading}>
-            {loading ? "Enviando..." : "Enviar incidencia"}
+          <button className="btn" type="submit" disabled={submitting}>
+            {submitting ? "Enviando..." : "Enviar incidencia"}
           </button>
 
         </form>

@@ -12,14 +12,50 @@ const RATE_LIMIT_MS = 30 * 1000; // 30 segundos
 // ===============================
 const MIN_FORM_TIME = 5000;
 const MAX_DESC_LENGTH = 5000;
+const MAX_PHOTOS = 5;
+const CLOUDINARY_URL_PREFIX = "https://res.cloudinary.com/";
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const SECRET = process.env.HMAC_SECRET;
 
 // ===============================
 // SANITIZADOR
 // ===============================
-const sanitize = (str = "") =>
-  String(str).replace(/[<>]/g, "").trim();
+const sanitize = (str = "") => String(str).replace(/[<>]/g, "").trim();
+
+const escapeHtml = (str = "") =>
+  sanitize(str)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const isCloudinaryUrl = (url) =>
+  typeof url === "string" && url.trim().startsWith(CLOUDINARY_URL_PREFIX);
+
+const sanitizeCloudinaryUrls = (fotos) =>
+  Array.isArray(fotos)
+    ? fotos.filter(isCloudinaryUrl).map((url) => encodeURI(url.trim()))
+    : [];
+
+const EMAIL_TO_BY_BASE = {
+  Miravete: process.env.MIRAVETE,
+  "San Epi": process.env.SAN_EPI,
+  Ventas: process.env.VENTAS,
+  "Madrid Rio": process.env.MADRID_RIO,
+  Vistalegre: process.env.VISTALEGRE,
+  Vaguada: process.env.VAGUADA,
+};
+
+const getRecipientByBase = (base) => {
+  const email = EMAIL_TO_BY_BASE[base];
+  return email || process.env.MADRID_RIO;
+};
+
+const renderHtmlSection = (title, body) =>
+  '<h3 style="color:#e4002b;">' + title + '</h3>' + body;
+
+const renderHtmlParagraph = (lines) =>
+  '<p style="font-size:13px;">' + lines.join('<br/>') + '</p>';
 
 // ===============================
 // HMAC VERIFY (opcional)
@@ -76,7 +112,7 @@ export const handler = async (event) => {
     // ===============================
     // BODY
     // ===============================
-    const data = JSON.parse(event.body);
+    const data = JSON.parse(event.body || "{}");
 
     const {
       nombre,
@@ -90,6 +126,7 @@ export const handler = async (event) => {
       matricula,
       descripcion,
       tipos,
+      fotos = [],
 
       riesgo,
       gravedad,
@@ -111,6 +148,7 @@ export const handler = async (event) => {
       nonce,
       signature,
     } = data;
+
 
     // ===============================
     // HONEYPOT
@@ -145,7 +183,7 @@ export const handler = async (event) => {
     // ===============================
     // VALIDACIONES
     // ===============================
-    if (!nombre || !telefono || !descripcion) {
+    if (!nombre || !telefono || !descripcion || !base) {
       return {
         statusCode: 400,
         body: JSON.stringify({
@@ -155,7 +193,7 @@ export const handler = async (event) => {
       };
     }
 
-    if (telefono.length < 6) {
+    if (String(telefono).length < 6) {
       return {
         statusCode: 400,
         body: JSON.stringify({
@@ -165,7 +203,7 @@ export const handler = async (event) => {
       };
     }
 
-    if (descripcion.length > MAX_DESC_LENGTH) {
+    if (String(descripcion).length > MAX_DESC_LENGTH) {
       return {
         statusCode: 400,
         body: JSON.stringify({
@@ -175,7 +213,7 @@ export const handler = async (event) => {
       };
     }
 
-    if (!autorizacion || autorizacion.trim() === "") {
+    if (!autorizacion || String(autorizacion).trim() === "") {
       return {
         statusCode: 400,
         body: JSON.stringify({
@@ -185,8 +223,38 @@ export const handler = async (event) => {
       };
     }
 
+    if (email && !EMAIL_REGEX.test(String(email))) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          ok: false,
+          message: "Email inválido",
+        }),
+      };
+    }
+
+    if (formStartedAt && isNaN(Number(formStartedAt))) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          ok: false,
+          message: "Referencia de tiempo inválida",
+        }),
+      };
+    }
+
+    if (fotos.length > MAX_PHOTOS) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          ok: false,
+          message: `Máximo ${MAX_PHOTOS} imágenes permitidas`,
+        }),
+      };
+    }
+
     // ===============================
-    // HMAC
+    // HMAC (solo si se envía firma)
     // ===============================
     if (SECRET && signature) {
       const payload = JSON.stringify({
@@ -197,9 +265,7 @@ export const handler = async (event) => {
         nonce,
       });
 
-      const valid = verifySignature(payload, signature);
-
-      if (!valid) {
+      if (!verifySignature(payload, signature)) {
         return {
           statusCode: 403,
           body: JSON.stringify({
@@ -237,10 +303,53 @@ export const handler = async (event) => {
       observaciones: sanitize(observaciones),
       autorizacion: sanitize(autorizacion),
 
-      tipos: Array.isArray(tipos)
-        ? tipos.map((t) => sanitize(t))
-        : [],
+      tipos: Array.isArray(tipos) ? tipos.map((t) => sanitize(t)) : [],
+
+      fotos: sanitizeCloudinaryUrls(fotos),
     };
+
+    const htmlSafe = Object.fromEntries(
+      Object.entries(safe).map(([key, value]) => [
+        key,
+        Array.isArray(value) ? value.map((item) => escapeHtml(item)) : escapeHtml(value),
+      ])
+    );
+
+    const tiposText = safe.tipos.length > 0 ? safe.tipos.join(", ") : "No indicado";
+    const tiposHtml = htmlSafe.tipos.length > 0 ? htmlSafe.tipos.join(", ") : "No indicado";
+    const fotosText =
+      safe.fotos.length > 0 ? safe.fotos.map((url) => "- " + url).join("\n") : "Sin imágenes adjuntas";
+    const fotosHtml =
+      safe.fotos.length > 0
+        ? `
+      <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;">
+        <tr>
+          ${safe.fotos
+            .map((url) => {
+              const thumb = url.replace(
+                "/upload/",
+                "/upload/f_auto,q_auto,w_200,h_200,c_fill/"
+              );
+
+              return `
+                <td style="padding:0 6px 6px 0;">
+                  <a href="${escapeHtml(url)}" target="_blank">
+                    <img 
+                      src="${escapeHtml(thumb)}" 
+                      width="120" height="120"
+                      alt="Foto incidencia"
+                      style="display:block;border-radius:6px;border:1px solid #ddd;"
+                    />
+                  </a>
+                </td>
+              `;
+            })
+            .join("")}
+        </tr>
+      </table>
+    `
+        : "<p style='font-size:13px;'>Sin imágenes adjuntas</p>";
+    const recipientEmail = getRecipientByBase(safe.base);
 
     // ===============================
     // TRANSPORTER (SMTP PRO)
@@ -258,96 +367,125 @@ export const handler = async (event) => {
     // ===============================
     // HTML PRO
     // ===============================
-    const html = `
-<div style="font-family: Arial, Helvetica, sans-serif; background:#f4f6f8; padding:20px;">
-  <div style="max-width:800px; margin:0 auto; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.08);">
-
-    <div style="background:#e4002b; color:#fff; padding:18px 20px;">
-      <h2 style="margin:0; font-size:18px;">Nueva incidencia registrada</h2>
-      <p style="margin:5px 0 0; font-size:13px;">UGT Madrid Río</p>
-    </div>
-
-    <div style="padding:20px;">
-
-      <h3 style="color:#e4002b;">Resumen</h3>
-      <p style="font-size:13px;">
-        <b>Nombre:</b> ${safe.nombre}<br/>
-        <b>Teléfono:</b> ${safe.telefono}<br/>
-        <b>Base:</b> ${safe.base}<br/>
-        <b>Fecha:</b> ${safe.fecha} ${safe.hora}
-      </p>
-
-      <h3 style="color:#e4002b;">Incidencia</h3>
-      <p style="font-size:13px;">
-        <b>Vehículo:</b> ${safe.vehiculo}<br/>
-        <b>Matrícula:</b> ${safe.matricula}
-      </p>
-
-      <h3 style="color:#e4002b;">Tipos</h3>
-      <p style="font-size:13px;">${safe.tipos.join(", ")}</p>
-
-      <h3 style="color:#e4002b;">Riesgo</h3>
-      <p style="font-size:13px;">
-        <b>Riesgo:</b> ${safe.riesgo}<br/>
-        <b>Gravedad:</b> ${safe.gravedad}<br/>
-        <b>Continúa:</b> ${safe.continua}
-      </p>
-
-      <h3 style="color:#e4002b;">Descripción</h3>
-      <p style="font-size:13px; white-space:pre-wrap;">${safe.descripcion}</p>
-
-      <h3 style="color:#e4002b;">Autorización</h3>
-      <p style="font-size:13px;">${safe.autorizacion}</p>
-
-      <h3 style="color:#e4002b;">Observaciones</h3>
-      <p style="font-size:13px; white-space:pre-wrap;">${safe.observaciones}</p>
-
-    </div>
-  </div>
-</div>
-`;
+    const html =
+      '<div style="font-family: Arial, Helvetica, sans-serif; background:#f4f6f8; padding:20px;">' +
+      '<div style="max-width:800px; margin:0 auto; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.08);">' +
+      '<div style="background:#e4002b; color:#fff; padding:18px 20px;">' +
+      '<h2 style="margin:0; font-size:18px;">Nueva incidencia registrada</h2>' +
+      '<p style="margin:5px 0 0; font-size:20px;">UGT</p>' +
+      "</div>" +
+      '<div style="padding:20px;">' +
+      renderHtmlSection(
+        "Resumen del trabajador",
+        renderHtmlParagraph([
+          "<b>Nombre:</b> " + htmlSafe.nombre,
+          "<b>Número de empleado:</b> " + htmlSafe.empleado,
+          "<b>Teléfono:</b> " + htmlSafe.telefono,
+          "<b>Email:</b> " + htmlSafe.email,
+        ])
+      ) +
+      renderHtmlSection(
+        "Detalle de la incidencia",
+        renderHtmlParagraph([
+          "<b>Fecha:</b> " + htmlSafe.fecha,
+          "<b>Hora:</b> " + htmlSafe.hora,
+          "<b>Base:</b> " + htmlSafe.base,
+          "<b>Vehículo:</b> " + htmlSafe.vehiculo,
+          "<b>Matrícula:</b> " + htmlSafe.matricula,
+        ])
+      ) +
+      renderHtmlSection("Tipos seleccionados", '<p style="font-size:13px;">' + tiposHtml + "</p>") +
+      renderHtmlSection(
+        "Riesgos",
+        renderHtmlParagraph([
+          "<b>Riesgo:</b> " + htmlSafe.riesgo,
+          "<b>Gravedad:</b> " + htmlSafe.gravedad,
+          "<b>Continúa:</b> " + htmlSafe.continua,
+        ])
+      ) +
+      renderHtmlSection(
+        "Descripción",
+        '<p style="font-size:13px; white-space:pre-wrap;">' + htmlSafe.descripcion + "</p>"
+      ) +
+      renderHtmlSection(
+        "Comunicación previa",
+        renderHtmlParagraph([
+          "<b>Comunicada:</b> " + htmlSafe.comunicada,
+          "<b>Comunicado a:</b> " + htmlSafe.comunicadoA,
+          "<b>Respuesta:</b> " + htmlSafe.respuesta,
+          "<b>Detalle respuesta:</b> " + htmlSafe.detalleRespuesta,
+        ])
+      ) +
+      renderHtmlSection("Autorización", '<p style="font-size:13px;">' + htmlSafe.autorizacion + "</p>") +
+      renderHtmlSection(
+        "Observaciones",
+        '<p style="font-size:13px; white-space:pre-wrap;">' + htmlSafe.observaciones + "</p>"
+      ) +
+      renderHtmlSection("Documentación", fotosHtml) +
+      "</div>" +
+      "</div>" +
+      "</div>";
 
     // ===============================
     // TEXT (ANTI-SPAM)
     // ===============================
-    const text = `
-NUEVA INCIDENCIA UGT MADRID RÍO
-
-Nombre: ${safe.nombre}
-Teléfono: ${safe.telefono}
-Base: ${safe.base}
-Fecha: ${safe.fecha} ${safe.hora}
-
-Vehículo: ${safe.vehiculo}
-Matrícula: ${safe.matricula}
-
-Tipos: ${safe.tipos.join(", ")}
-
-Riesgo: ${safe.riesgo}
-Gravedad: ${safe.gravedad}
-Continúa: ${safe.continua}
-
-Descripción:
-${safe.descripcion}
-
-Autorización: ${safe.autorizacion}
-
-Observaciones:
-${safe.observaciones}
-`;
+    const text = [
+      "NUEVA INCIDENCIA UGT MADRID RÍO",
+      "",
+      "RESUMEN DEL TRABAJADOR",
+      "Nombre: " + safe.nombre,
+      "Número de empleado: " + safe.empleado,
+      "Teléfono: " + safe.telefono,
+      "Email: " + safe.email,
+      "",
+      "DETALLE DE LA INCIDENCIA",
+      "Fecha: " + safe.fecha,
+      "Hora: " + safe.hora,
+      "Base: " + safe.base,
+      "Vehículo: " + safe.vehiculo,
+      "Matrícula: " + safe.matricula,
+      "",
+      "TIPOS SELECCIONADOS",
+      tiposText,
+      "",
+      "RIESGOS",
+      "Riesgo: " + safe.riesgo,
+      "Gravedad: " + safe.gravedad,
+      "Continúa: " + safe.continua,
+      "",
+      "DESCRIPCIÓN",
+      safe.descripcion,
+      "",
+      "COMUNICACIÓN PREVIA",
+      "Comunicada: " + safe.comunicada,
+      "Comunicado a: " + safe.comunicadoA,
+      "Respuesta: " + safe.respuesta,
+      "Detalle respuesta: " + safe.detalleRespuesta,
+      "",
+      "AUTORIZACIÓN",
+      safe.autorizacion,
+      "",
+      "OBSERVACIONES",
+      safe.observaciones,
+      "",
+      "IMÁGENES CLOUDINARY",
+      fotosText,
+    ].join("\n");
 
     // ===============================
     // SEND EMAIL
     // ===============================
     await transporter.sendMail({
       from: `"UGT Incidencias" <${process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_TO,
-      replyTo: email || process.env.EMAIL_USER,
+      to: recipientEmail,
+      replyTo: htmlSafe.email || process.env.EMAIL_USER,
       subject: "Nueva incidencia recibida",
       html,
       text,
       headers: {
         "X-Entity-Ref-ID": "ugt-incidencias",
+        "X-Priority": "1",
+        "X-MSMail-Priority": "High",
       },
     });
 
@@ -356,13 +494,20 @@ ${safe.observaciones}
       body: JSON.stringify({ ok: true }),
     };
   } catch (err) {
-    console.error("ERROR:", err);
+    const isSmtpError = err.code === "EAUTH" || err.code === "ECONNECTION" || err.code === "ETIMEDOUT";
+    const context = {
+      errorType: isSmtpError ? "smtp" : "unknown",
+      message: err.message,
+      ...(err.code && { code: err.code }),
+    };
+    console.error("[sendEmail]", JSON.stringify(context), err);
 
+    const statusCode = isSmtpError ? 502 : 500;
     return {
-      statusCode: 500,
+      statusCode,
       body: JSON.stringify({
         ok: false,
-        message: "Error interno del servidor",
+        message: isSmtpError ? "Error al enviar el correo" : "Error interno del servidor",
       }),
     };
   }
